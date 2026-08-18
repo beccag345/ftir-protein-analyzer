@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 import sys
 from PySide6.QtWidgets import QApplication, QLabel
 
