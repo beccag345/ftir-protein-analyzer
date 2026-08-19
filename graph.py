@@ -47,11 +47,6 @@ def avg_dfs(files):
         raise RuntimeError(f"Failed to average provided files")
 
 
-def gaussian(x, amplitude, center, sigma):
-    """Evaluate a Gaussian using sigma as its standard deviation."""
-    return amplitude * np.exp(-0.5 * ((x - center) / sigma) ** 2)
-
-
 @dataclass(frozen=True)
 class GaussianPeak:
     """Parameters resulting from a local Gaussian fit."""
@@ -61,7 +56,16 @@ class GaussianPeak:
     sigma: float
 
     def evaluate(self, x):
-        return gaussian(np.asarray(x), self.amplitude, self.center, self.sigma)
+        """
+        Args:
+            x (np.array): array of x datapoints for which to calculate gaussian y-vals
+        Returns:
+            an ```np.array``` of length equal to x with corresponding y-vals
+        """
+        x = np.asarray(x)
+        return self.amplitude * np.exp(
+            -0.5 * ((x - self.center) / self.sigma) ** 2
+        )
 
     @property
     def area(self):
@@ -70,7 +74,17 @@ class GaussianPeak:
 
 
 def fit_gaussian(x, y, guess=None):
-    """Fit a negative Gaussian to the supplied peak data."""
+    """
+    Fits a negative Gaussian to the supplied peak data
+
+    Args:
+        x (array-like): wavenumber values for the selected peak
+        y (array-like): second-derivative values for the selected peak
+        guess (tuple, optional): initial amplitude, center, and sigma values
+
+    Returns:
+        tuple: fitted GaussianPeak and parameter covariance matrix
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
@@ -82,7 +96,9 @@ def fit_gaussian(x, y, guess=None):
     )
 
     parameters, covariance = curve_fit(
-        gaussian,
+        lambda x, amplitude, center, sigma: GaussianPeak(
+            amplitude, center, sigma
+        ).evaluate(x),
         x,
         y,
         p0=(guess if guess else auto_guess),
