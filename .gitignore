@@ -28,3 +28,7 @@ dist/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Test input/output data
+Data/
+*.csv
