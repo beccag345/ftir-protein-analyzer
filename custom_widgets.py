@@ -12,12 +12,13 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QFileDialog,
     QListView,
-    QFileSystemModel
     )
 from PySide6.QtCore import (
+    Qt,
     Slot,
     QDir,
-    QAbstractListModel
+    QAbstractListModel,
+    QModelIndex
     )
 
 class MainWindow(QMainWindow):
@@ -34,24 +35,48 @@ class ImportBtn(QPushButton):
 
 class GraphEditor(QWidget):
     """Displays technical replicate FTIR and allows to fit gaussians to them"""
-    def __init__(self, *args, **kwargs):
+    def __init__(self, files: list, *args, **kwargs):
         super().__init__(*args, **kwargs)
         v_layout = QVBoxLayout()
         self.setLayout(v_layout)
+        self.file_list = files
         
-        opened_files_list = QListView()
-        model = QFileSystemModel()
-        model.setRootPath(QDir.currentPath())
-        opened_files_list.setModel(model)
-        v_layout.addWidget(opened_files_list)
+        # Create a list view of files at the top
+        file_list_disp = QListView()
+        clipped_paths = list(map(lambda f: f.split("/")[-1], self.file_list))
+        model = ListViewModel(data_list=clipped_paths)
+        file_list_disp.setModel(model)
+        v_layout.addWidget(file_list_disp)
         
 class ListViewModel(QAbstractListModel):
-    """Used to represent the opened """
-    def __init__(self, *args, **kwargs):
+    """Used to represent opened files of replicates within a sample"""
+    
+    def __init__(self, data_list: list, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        
-    def rowCount(self, index, role):
-        return super().rowCount()         
+        self.data_list = data_list
+
+    def rowCount(self, parent=QModelIndex()):
+        if parent.isValid():
+            return 0
+        return len(self.data_list)
+
+    def data(
+        self,
+        index: QModelIndex,
+        role=Qt.ItemDataRole.DisplayRole,
+    ):
+        if not index.isValid():
+            return None
+
+        row = index.row()
+        if not 0 <= row < len(self.data_list):
+            return None
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            return self.data_list[row]
+
+        return None
+                 
 
 class ImportAndEdit(QStackedWidget):
     """ 
@@ -73,6 +98,6 @@ class ImportAndEdit(QStackedWidget):
         self.selected_files = explorer.getOpenFileNames()[0]
         self.widgetAdded.connect(self.setCurrentIndex)
         if self.selected_files:
-            editor_view = GraphEditor()
+            editor_view = GraphEditor(files=self.selected_files)
             self.addWidget(editor_view)
-        # Create list view of files
+        
