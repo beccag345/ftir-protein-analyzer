@@ -91,11 +91,11 @@ class Tab(QWidget):
         stretch_layout.addWidget(self.splitter)
         stretch_layout.setStretchFactor(self.splitter, 1)
         graph_editor = ImportAndEdit()
-        self.splitter.addWidget(graph_editor)
-        
+        self.splitter.addWidget(graph_editor)        
         
         output_container = QWidget()
         self.splitter.addWidget(output_container)
+        self.splitter.setSizes([400, 400])
         output_layout = QVBoxLayout()
         output_container.setLayout(output_layout)
         
@@ -104,8 +104,7 @@ class Tab(QWidget):
         
         output_box = QTextEdit()
         output_box.setReadOnly(True)
-        output_layout.addWidget(output_box)
-        
+        output_layout.addWidget(output_box)        
 
 @Slot()
 def add_new_tab():

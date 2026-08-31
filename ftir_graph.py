@@ -11,6 +11,36 @@ from pybaselines import Baseline
 from scipy.optimize import curve_fit
 from scipy.signal import savgol_filter
 
+def tech_df(file, plot_range=[1700, 1590]):
+    """Returns a df of smoothed 2nd derivative values based on provided plot range and single FTIR technical replicate file"""
+    # Check range validity and reset to default if invalid range provided
+    if (not isinstance(plot_range, list) or len(plot_range) != 2 or not isinstance(plot_range[0], (int, float)) or not isinstance(plot_range[1], (int, float))):
+        plot_range = [1700, 1590]
+    try:
+        file_df = pd.read_csv(file, sep="\t", names=["Wavenumber","Abs"])
+        # Select plot region
+        mask = ((file_df["Wavenumber"] <= max(plot_range)) & (file_df["Wavenumber"] >= min(plot_range)))
+        file_df = file_df.loc[mask]
+        
+        # Correct baseline
+        x = file_df["Wavenumber"].values
+        y = file_df["Abs"].values
+        corr_y, params = Baseline(x).asls(data=y)
+        file_df["Corrected Abs"] = file_df["Abs"] - corr_y
+        
+        # Apply Savitsky-Golay filter
+        abs_to_smooth = "Corrected Abs" if ("Corrected Abs" in file_df.columns.tolist()) else "Abs"
+            
+        sav_filt_2 = savgol_filter(file_df[abs_to_smooth], window_length=9, polyorder=6, deriv=2)
+        file_df["Second Derivative"] = sav_filt_2
+        
+        return file_df
+    except:
+        print(f"Failed to read/parse {file}")
+        return None
+    
+
+# TODO: refactor this for a design based on interacting with individial replicates until the very final output
 def avg_dfs(files):
     """
     Returns a single pandas dataframe representing averaged plot data for provided files
