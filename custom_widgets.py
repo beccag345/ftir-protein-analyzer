@@ -1,6 +1,8 @@
 import sys
 import pyqtgraph as pg
 import pandas as pd
+import numpy as np
+from enum import IntEnum, auto
 from dataclasses import dataclass
 from PySide6.QtWidgets import (
     QApplication, 
@@ -49,15 +51,28 @@ class PlotData():
         self.max_peaks, self.local_min_xs = self._local_min() # total number of peaks to be fitted and a list of their wavenum positions
         self.peaks_fitted = 0 # peaks that have already been fitted
         
+    class PointType(IntEnum):
+        REGULAR = 0
+        UNFITTED = 1
+        FITTED = 2
+        
     def _local_min(self):
-            """Helper function representing the total nubmer of local minima in the plotted graph
+            """Helper function representing the total nubmer of local minima in the plotted graph,
+            as well as an array of colors corresponding to datapoints (blue for regular, green for fitted, red for not fitted yet)
             Returns:
                 (qty, locations) (tuple)
             """
             y = self.data["Second Derivative"].to_numpy(copy=False)
-            minima = (y[1:-1] < y[:-2]) & (y[1:-1] < y[2:]) & (y[1:-1] < 0)
-            locations = self.data["Wavenumber"].to_numpy(copy=False)[1:-1][minima].tolist()
-            return len(locations), locations
+            minima_mask = (y[1:-1] < y[:-2]) & (y[1:-1] < y[2:]) & (y[1:-1] < 0) # boolean array where minima are True
+            # Add column with point types hinting at future recoloring to the df
+            self.data["Point Type"] = np.full(len(self.data), self.PointType.REGULAR)
+            
+            full_minima_mask = np.zeros(len(self.data), dtype=bool) # temporarily fill with False
+            full_minima_mask[1:-1] = minima_mask # apply clipped mask to overall list
+            
+            self.data.loc[full_minima_mask, "Point Type"] = self.PointType.UNFITTED
+            locations = self.data["Wavenumber"].to_numpy(copy=False)[1:-1][minima_mask].tolist()
+            return len(locations), locations # TODO: potentially get rid of this since there's a dedicated point type column in the df now
 
 class GraphEditor(QWidget):
     """Main widget Displays technical replicate FTIR and allows to fit gaussians to them"""
@@ -87,13 +102,12 @@ class GraphEditor(QWidget):
 
         self.plot_item = pg.PlotItem()
         self.graphics_view.setCentralItem(self.plot_item)
-
-        self.curve = self.plot_item.plot()
-        self.plot_item.addLine(
-            y=0,
-            movable=False,
-            pen=pg.mkPen("k", width=1),
-        )
+        
+        # Used to color-code points on the plot based on fitting status
+        self._pens = np.asarray(
+            [pg.mkPen("#003A91"),
+            pg.mkPen('r'),
+            pg.mkPen('g')])
         
     @Slot(QModelIndex)
     def change_active_plot(self, index):
@@ -110,7 +124,22 @@ class GraphEditor(QWidget):
         df = self.plot_objs[active_index].data
         x = df["Wavenumber"].to_numpy(copy=False)
         y = df["Second Derivative"].to_numpy(copy=False)
-        self.curve.setData(x, y)
+        colors = self._pens[df["Point Type"]]
+        
+        self.plot_item.clear()
+        self.plot_item.plot(
+                    x,
+                    y,
+                    symbolPen=colors,
+                    symbol='t1',
+                    symbolSize=5,
+                )
+        
+        self.lin_region = pg.LinearRegionItem()
+        self.plot_item.addItem(self.lin_region)
+        
+        self.lin_region.setRegion((min(x), min(x) + np.ptp(x) / 10))
+        self.lin_region.setBounds((min(x), max(x)))
             
 class ListViewModel(QAbstractListModel):
     """Used to represent opened files of replicates within a sample"""

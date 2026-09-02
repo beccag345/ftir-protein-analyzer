@@ -112,7 +112,6 @@ def add_new_tab():
     new_tab_index = tabs.addTab(new_tab, "New Sample")
     tabs.setCurrentIndex(new_tab_index)
 
-
 @Slot(int)
 def close_tab(index):
     if tabs.count() > 1:
