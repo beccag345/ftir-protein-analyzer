@@ -71,7 +71,7 @@ class PlotData():
             full_minima_mask[1:-1] = minima_mask # apply clipped mask to overall list
             
             self.data.loc[full_minima_mask, "Point Type"] = self.PointType.UNFITTED
-            locations = self.data["Wavenumber"].to_numpy(copy=False)[1:-1][minima_mask].tolist()
+            locations = self.data["Wavenumber"].to_numpy(copy=False)[1:-1][minima_mask]
             return len(locations), locations # TODO: potentially get rid of this since there's a dedicated point type column in the df now
 
 class GraphEditor(QWidget):
@@ -83,6 +83,8 @@ class GraphEditor(QWidget):
         self.file_list = files # List of paths
         self.plot_objs = list(map(lambda f: PlotData(filepath=f), self.file_list))
         self.active_file = 0 # Changes when another technical replicate is selected        
+        self.active_plot = None # TODO currently active DataFrame that can be modified from the fitter slot
+        self.lin_region = pg.LinearRegionItem() # used to select plot areas for gaussian fitting
         
         # Create a list view of files at the top
         file_list_disp = QListView()
@@ -95,19 +97,50 @@ class GraphEditor(QWidget):
         self.gaus_counter = QLabel()
         v_layout.addWidget(self.gaus_counter)
         
+        # Button to fit gaussian peaks to processed 2nd derivative plot
+        fit_btn = QPushButton("Fit curve")
+        fit_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        fit_btn.pressed.connect(self.fit_gaussian)
+        v_layout.addWidget(fit_btn)
+        
         # Main plot control area for fitting gaussians
         file_list_disp.selectionModel().currentChanged.connect(self.change_active_plot)
         self.graphics_view = pg.GraphicsView()
         v_layout.addWidget(self.graphics_view)
 
         self.plot_item = pg.PlotItem()
+        self.plot_item.invertX()
+        self.plot_item.addItem(self.lin_region)
+        self.plot_item.addLine(y=0, movable=False) # show x-axis
         self.graphics_view.setCentralItem(self.plot_item)
         
         # Used to color-code points on the plot based on fitting status
-        self._pens = np.asarray(
-            [pg.mkPen("#003A91"),
-            pg.mkPen('r'),
-            pg.mkPen('g')])
+        self._brushes = np.asarray(
+            [pg.mkBrush("#003A91"),
+            pg.mkBrush('r'),
+            pg.mkBrush('g')])
+        
+    @Slot()
+    def fit_gaussian(self):
+        """Fits gaussian curve to the plot within the selected linear region via the least-squares method
+        The idea is that """
+        # Retrieve current bounds of the selection region
+        sel_region = self.lin_region.getRegion()
+        self._min_in_bounds(lower=sel_region[0], upper=sel_region[1])
+        
+        # TODO retrieve points of interest from 2nd derivative plot
+        
+    def _min_in_bounds(self, lower, upper):
+        """Returns true if and only if there is exactly one unfitted local minimum within the provided range"""
+        print(f"from {lower} to {upper}")
+        
+        min_pts = self.plot_objs[self.active_file].local_min_xs # numpy array of local minima locations
+        
+        if np.count_nonzero(((min_pts > lower) & (min_pts < upper))) == 1:
+            print("True")
+            return True
+        print("False")
+        return False
         
     @Slot(QModelIndex)
     def change_active_plot(self, index):
@@ -124,20 +157,17 @@ class GraphEditor(QWidget):
         df = self.plot_objs[active_index].data
         x = df["Wavenumber"].to_numpy(copy=False)
         y = df["Second Derivative"].to_numpy(copy=False)
-        colors = self._pens[df["Point Type"]]
+        colors = self._brushes[df["Point Type"]]
         
-        self.plot_item.clear()
-        self.plot_item.plot(
-                    x,
-                    y,
-                    symbolPen=colors,
-                    symbol='t1',
-                    symbolSize=5,
-                )
-        
-        self.lin_region = pg.LinearRegionItem()
-        self.plot_item.addItem(self.lin_region)
-        
+        self.plot_item.removeItem(self.active_plot)
+        self.active_plot = self.plot_item.plot(
+                            x,
+                            y,
+                            symbolBrush=colors,
+                            symbol='t1',
+                            symbolSize=5,
+                        )
+                
         self.lin_region.setRegion((min(x), min(x) + np.ptp(x) / 10))
         self.lin_region.setBounds((min(x), max(x)))
             
