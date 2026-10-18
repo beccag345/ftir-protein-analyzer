@@ -19,8 +19,8 @@ def tech_df(file, plot_range=[1700, 1590]):
     try:
         file_df = pd.read_csv(file, sep="\t", names=["Wavenumber","Abs"])
         # Select plot region
-        mask = ((file_df["Wavenumber"] <= max(plot_range)) & (file_df["Wavenumber"] >= min(plot_range)))
-        file_df = file_df.loc[mask]
+        #mask = ((file_df["Wavenumber"] <= max(plot_range)) & (file_df["Wavenumber"] >= min(plot_range)))
+        #file_df = file_df.loc[mask]
         
         # Correct baseline
         x = file_df["Wavenumber"].values
@@ -28,11 +28,13 @@ def tech_df(file, plot_range=[1700, 1590]):
         corr_y, params = Baseline(x).asls(data=y)
         file_df["Corrected Abs"] = file_df["Abs"] - corr_y
         
-        # Apply Savitsky-Golay filter
-        abs_to_smooth = "Corrected Abs" if ("Corrected Abs" in file_df.columns.tolist()) else "Abs"
-            
-        sav_filt_2 = savgol_filter(file_df[abs_to_smooth], window_length=9, polyorder=6, deriv=2)
+        # Apply Savitsky-Golay filter          
+        sav_filt_2 = savgol_filter(file_df["Corrected Abs"], window_length=9, polyorder=6, deriv=2)
         file_df["Second Derivative"] = sav_filt_2
+        
+        #Select plot region
+        mask = ((file_df["Wavenumber"] <= max(plot_range)) & (file_df["Wavenumber"] >= min(plot_range)))
+        file_df = file_df.loc[mask]
         
         return file_df
     except:
