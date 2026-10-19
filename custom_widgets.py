@@ -42,6 +42,7 @@ class ImportBtn(QPushButton):
 class PlotData():
     """Contains information about fitted gaussians, peaks, as well as the working dataframe for techical replicate plots"""
     def __init__(self, filepath):
+        self.filepath = filepath
         self.data = ftir.tech_df(file = filepath)
         self.gaussian = pd.DataFrame()
         self.max_peaks, self.local_min_xs = self._local_min() # total number of peaks to be fitted and a list of their wavenum positions
@@ -58,13 +59,21 @@ class PlotData():
         
         # Automatically fit 2nd deriv curve to the data using the least-squares method
         local_minima = self.data.loc[self.data["Point Type"].eq(self.PointType.MIN)]
-        params = self._get_guess_params(local_minima["Wavenumber"], local_minima["Second Derivative"], x_interp_tuple[0], x_interp_tuple[1])
+        params = np.asarray(self._get_guess_params(local_minima["Wavenumber"], local_minima["Second Derivative"], x_interp_tuple[0], x_interp_tuple[1]))
         
         # Fit the 2nd derivative curve to the data using the least-squares method
         
         xdata = self.data["Wavenumber"].loc[ ~self.data["Point Type"].eq(self.PointType.INTERCEPT) ].to_numpy(copy=False)
         ydata = self.data["Second Derivative"].loc[ ~self.data["Point Type"].eq(self.PointType.INTERCEPT) ].to_numpy(copy=False) # Removes artificial x-intercept points from the data to be fitted
         
+        # Since our true gaussian function values are so low, normalize the ydata against the depth of the deepest 2nd deriv local min
+        norm_factor = abs(
+            1 / self.data.loc[self.data["Point Type"].eq(self.PointType.MIN), "Second Derivative"].min()  
+            )
+        norm_ydata = norm_factor * ydata
+        
+        params[::3] *= norm_factor
+
         n_peaks = len(params) // 3
         SIGMA_MIN = 1e-3  # Numerical floor; consider a resolution-based limit
 
@@ -73,15 +82,59 @@ class PlotData():
             np.tile([np.inf, np.inf, xdata.max()], n_peaks),
         )
         
-        opt_params = scipy.optimize.curve_fit(self._2nd_deriv_sum, xdata, ydata, p0=params, maxfev=100000, bounds=bounds) # TODO: add bounds to the optimization to prevent negative sigmas and As
+        self.opt_params = scipy.optimize.curve_fit(self._2nd_deriv_sum,
+                                                   xdata,
+                                                   norm_ydata,
+                                                   p0=params,
+                                                   maxfev=100000,
+                                                   bounds=bounds)
+        
+        # Now restore the original function by dividing optimized As by it, since they are directly proportional to 2nd deriv f(x)
+        self.opt_params[0][::3] /= norm_factor
         
         # This is a function that can be called to get the fitted 2nd derivative curve based on the optimized parameters
-        self.fitted_2nd_deriv = lambda x: self._2nd_deriv_sum(x, *opt_params[0])
+        self.fitted_2nd_deriv = lambda x: self._2nd_deriv_sum(x, *self.opt_params[0])
         
+        self.integrated_areas = self._integrate(self.opt_params[0][::3], self.opt_params[0][1::3], self.opt_params[0][2::3])
+        # Compute protein secondary structure ratios
+        total_area = self.integrated_areas["Integrated Area"].sum()
+        peak_ratios = self.integrated_areas.copy()
+        peak_ratios["Fraction"] = peak_ratios["Integrated Area"] / total_area if total_area != 0 else 0
+        
+        sec_struct_ratios = pd.DataFrame()
+        sec_struct_ratios.index = ["α-helix", "3⏨-helix", "β-sheet", "β-turn", "Random Coil", "Unknown"]
+        
+        sec_struct_ratios.loc["α-helix", "Fraction"] = peak_ratios.loc[peak_ratios["Wavenumber"].between(1652, 1658.8, inclusive="left"), "Fraction"].sum()
+        sec_struct_ratios.loc["3⏨-helix", "Fraction"] = peak_ratios.loc[peak_ratios["Wavenumber"].between(1658.8, 1666, inclusive="left"), "Fraction"].sum()
+        sec_struct_ratios.loc["β-sheet", "Fraction"] = peak_ratios.loc[
+            peak_ratios["Wavenumber"].between(1622, 1644, inclusive="left") | 
+            peak_ratios["Wavenumber"].between(1688, 1700, inclusive="left"), "Fraction"].sum()
+        sec_struct_ratios.loc["β-turn", "Fraction"] = peak_ratios.loc[peak_ratios["Wavenumber"].between(1666, 1688, inclusive="left"), "Fraction"].sum()
+        sec_struct_ratios.loc["Random Coil", "Fraction"] = peak_ratios.loc[peak_ratios["Wavenumber"].between(1644, 1652, inclusive="left"), "Fraction"].sum()
+        sec_struct_ratios.loc["Unknown", "Fraction"] = peak_ratios.loc[~peak_ratios["Wavenumber"].between(1622, 1700, inclusive="left"), "Fraction"].sum()
+
+        self.sec_struct_ratios = sec_struct_ratios
+
     class PointType(IntEnum):
         REGULAR = 0
         MIN = 1
         INTERCEPT = 2
+        
+    def _integrate(self, As, sigmas, mus):
+        """Finds the area underneath original gaussians given As, sigmas, and mus
+        Return:
+            Pandas dataframe with a wavenumber column of peak locations and corresponding integrated area column
+        """
+        if (len(As) != len(sigmas)) or (len(sigmas) != len(mus) or (len(As) != len(mus))):
+            raise ValueError("As, sigmas, and mus must be of the same length")
+        
+        integrated_areas = []
+        for A, sigma, mu in zip(As, sigmas, mus):
+            integrated_areas.append(
+                A * sigma * np.sqrt(2 * np.pi)
+            )
+            
+        return pd.DataFrame({"Wavenumber": mus, "Integrated Area": integrated_areas})
         
     def _2nd_deriv_sum(self, x, *args):
         """Returns the sum of all 2nd derivatives of gaussians based on provided parameters
@@ -247,6 +300,9 @@ class GraphEditor(QWidget):
             pg.mkBrush("#FFAD31"),
             pg.mkBrush("#FFFF00")])
         
+        # This is what gets displayed in the output box on the right side of the splitter in main.py
+        self.integral_data = [replicate.integrated_areas for replicate in self.plot_objs]
+        
     @Slot()
     def fit_gaussian(self):
         """Fits gaussian curve to the plot within the selected linear region via the least-squares method
@@ -257,8 +313,7 @@ class GraphEditor(QWidget):
         
         # TODO retrieve points of interest from 2nd derivative plot
         pass
-        
-        
+             
     def _min_in_bounds(self, lower, upper):
         """Returns true if and only if there is exactly one unfitted local minimum within the provided range"""
         print(f"from {lower} to {upper}")
@@ -291,6 +346,8 @@ class GraphEditor(QWidget):
         colors = self._brushes[df["Point Type"]]
         
         self.plot_item.removeItem(self.active_plot)
+        self.plot_item.removeItem(self.fitted_curve) if hasattr(self, "fitted_curve") else None
+        
         self.active_plot = self.plot_item.plot(
                             x,
                             y,
@@ -303,7 +360,7 @@ class GraphEditor(QWidget):
         # Construct a smooth fitted curve to display on this plot
         curve_x = np.linspace(min(x), max(x), 1000)
         curve_y = fitted_func(curve_x)
-        self.plot_item.plot(curve_x, curve_y, pen=pg.mkPen(color="#C800FF", width=0.5))
+        self.fitted_curve = self.plot_item.plot(curve_x, curve_y, pen=pg.mkPen(color="#C800FF", width=0.5))
                 
         self.lin_region.setRegion((min(x), min(x) + np.ptp(x) / 10))
         self.lin_region.setBounds((min(x), max(x)))
@@ -346,6 +403,7 @@ class ImportAndEdit(QStackedWidget):
         import_btn = ImportBtn()
         import_btn.clicked.connect(self.display_graphs)
         self.addWidget(import_btn)
+        self.selected_files = []
         
     @Slot()
     def display_graphs(self):
@@ -359,4 +417,26 @@ class ImportAndEdit(QStackedWidget):
         if self.selected_files:
             editor_view = GraphEditor(files=self.selected_files)
             self.addWidget(editor_view)
+            
+    def get_output(self):
+        """ 
+        Returns the outputs of all files in the graph editor as a string, which can be displayed in a QTextEdit widget
+        """
+        raw_csvs = ""
+        cumul_df = pd.DataFrame()
+        if self.count() > 1: # If the graph editor has been added to the stack
+            for replicate in self.widget(1).plot_objs:
+                raw_csvs += f"File {replicate.filepath}:\n {replicate.integrated_areas.to_csv(index=False)}\n\n"
+                #print(replicate.sec_struct_ratios)
+                cumul_df = pd.concat([cumul_df, replicate.sec_struct_ratios], ignore_index=False)
+
+        processed_df = cumul_df.groupby(level=0).mean()
+        processed_df["SEM"] = cumul_df.groupby(level=0).sem()["Fraction"]
+        
+        string_output = f"{processed_df.to_csv()}\n\n{raw_csvs}"
+        return string_output
+                
+                
+        
+        
         

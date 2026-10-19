@@ -104,6 +104,9 @@ class Tab(QWidget):
         
         output_box = QTextEdit()
         output_box.setReadOnly(True)
+        graph_editor.currentChanged.connect(
+            lambda _index: output_box.setPlainText(graph_editor.get_output())
+        )
         output_layout.addWidget(output_box)        
 
 @Slot()

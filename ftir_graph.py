@@ -29,7 +29,7 @@ def tech_df(file, plot_range=[1700, 1590]):
         file_df["Corrected Abs"] = file_df["Abs"] - corr_y
         
         # Apply Savitsky-Golay filter          
-        sav_filt_2 = savgol_filter(file_df["Corrected Abs"], window_length=9, polyorder=6, deriv=2)
+        sav_filt_2 = savgol_filter(file_df["Corrected Abs"], window_length=9, polyorder=6, deriv=2, delta=np.median(np.abs(np.diff(x))))
         file_df["Second Derivative"] = sav_filt_2
         
         #Select plot region
@@ -67,7 +67,7 @@ def avg_dfs(files):
             # Apply Savitsky-Golay filter
             abs_to_smooth = "Corrected Abs" if ("Corrected Abs" in file_df.columns.tolist()) else "Abs"
                 
-            sav_filt_2 = savgol_filter(file_df[abs_to_smooth], window_length=9, polyorder=6, deriv=2)
+            sav_filt_2 = savgol_filter(file_df[abs_to_smooth], window_length=9, polyorder=6, deriv=2, delta=np.median(np.abs(np.diff(x))))
             file_df["Second Derivative"] = sav_filt_2
             
             dfs.append(file_df)
